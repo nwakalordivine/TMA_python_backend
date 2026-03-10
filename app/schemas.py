@@ -3,13 +3,11 @@ Pydantic v2 schemas for request/response validation.
 """
 
 from datetime import datetime
-
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
-# ---------------------------------------------------------------------------
+
 # Auth schemas
-# ---------------------------------------------------------------------------
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=150)
@@ -42,9 +40,8 @@ class TokenVerifyResponse(BaseModel):
     username: str | None = None
 
 
-# ---------------------------------------------------------------------------
+
 # User schemas
-# ---------------------------------------------------------------------------
 
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -74,9 +71,8 @@ class LeaderboardEntry(BaseModel):
     reputation: float
 
 
-# ---------------------------------------------------------------------------
+
 # Task schemas
-# ---------------------------------------------------------------------------
 
 class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)

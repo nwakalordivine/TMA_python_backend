@@ -1,6 +1,4 @@
-"""
-FastAPI application — Auth, User, and Task routes.
-"""
+"""FastAPI application — Auth, User, and Task routes."""
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -42,10 +40,6 @@ from app.schemas import (
     UserResponse,
 )
 
-# ---------------------------------------------------------------------------
-# Lifespan — create tables on startup (dev convenience)
-# ---------------------------------------------------------------------------
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -60,7 +54,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow all origins for development; tighten in production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -69,15 +62,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ═══════════════════════════════════════════════════════════════════════════
-# AUTH ROUTES  /auth
-# ═══════════════════════════════════════════════════════════════════════════
 
+# Root
+@app.get("/")
+async def root():
+    return {
+        "service": "Task Management & Authentication API",
+        "version": "1.0.0",
+        "status": "running",
+    }
+
+
+# Auth routes
 
 @app.post("/auth/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def signup(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     """Register a new user."""
-    # Check for duplicate username or email
     existing = await db.execute(
         select(User).where((User.username == payload.username) | (User.email == payload.email))
     )
@@ -109,7 +109,7 @@ async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
 
 @app.post("/auth/verify", response_model=TokenVerifyResponse)
 async def verify_token(payload: TokenVerifyRequest):
-    """Validate a JWT — designed for cross-service calls (e.g. Node.js)."""
+    """Validate a JWT — designed for cross-service calls."""
     try:
         data = decode_access_token(payload.token)
         return TokenVerifyResponse(valid=True, user_id=data.get("user_id"), username=data.get("username"))
@@ -117,10 +117,7 @@ async def verify_token(payload: TokenVerifyRequest):
         return TokenVerifyResponse(valid=False)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# USER ROUTES  /users
-# ═══════════════════════════════════════════════════════════════════════════
-
+# User routes
 
 @app.get("/users/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
@@ -150,15 +147,12 @@ async def update_profile(
 
 @app.get("/users/leaderboard", response_model=list[LeaderboardEntry])
 async def leaderboard(limit: int = 20, db: AsyncSession = Depends(get_db)):
-    """Return users ranked by points (descending). Public endpoint."""
+    """Return users ranked by points (descending)."""
     result = await db.execute(select(User).order_by(User.points.desc()).limit(limit))
     return result.scalars().all()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# TASK ROUTES  /tasks
-# ═══════════════════════════════════════════════════════════════════════════
-
+# Task routes
 
 @app.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 async def create_task(
@@ -196,7 +190,7 @@ async def get_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Retrieve detailed information for a specific task."""
+    """Retrieve a specific task."""
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
     if not task:
@@ -210,16 +204,8 @@ async def claim_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Claim a task.
-
-    Uses SELECT ... FOR UPDATE to lock the task row and prevent
-    over-assignment under concurrent requests.
-    """
-    # Lock the task row for this transaction
-    result = await db.execute(
-        select(Task).where(Task.id == task_id).with_for_update()
-    )
+    """Claim a task. Uses row-level locking to prevent over-assignment."""
+    result = await db.execute(select(Task).where(Task.id == task_id).with_for_update())
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
@@ -230,7 +216,6 @@ async def claim_task(
     if task.current_assignees >= task.max_assignees:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task has reached maximum assignees")
 
-    # Check if user already has an active assignment for this task
     existing = await db.execute(
         select(TaskAssignment).where(
             TaskAssignment.user_id == current_user.id,
@@ -240,7 +225,6 @@ async def claim_task(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You have already claimed this task")
 
-    # Create assignment and increment counter atomically
     assignment = TaskAssignment(user_id=current_user.id, task_id=task_id)
     task.current_assignees += 1
     db.add(assignment)
@@ -255,7 +239,7 @@ async def start_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update the user's assignment status for this task to 'Started'."""
+    """Mark a claimed task as started."""
     result = await db.execute(
         select(TaskAssignment).where(
             TaskAssignment.user_id == current_user.id,
@@ -284,7 +268,7 @@ async def complete_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update the user's assignment status for this task to 'Completed'."""
+    """Mark a started task as completed."""
     result = await db.execute(
         select(TaskAssignment).where(
             TaskAssignment.user_id == current_user.id,
@@ -314,14 +298,7 @@ async def award_points(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Award points for a completed task assignment.
-
-    - Validates the assignment is in 'Completed' status.
-    - Ensures points are not awarded twice (idempotent).
-    - Credits the task's point_value to the user and logs the transaction.
-    """
-    # Verify a completed assignment exists
+    """Award points for a completed task assignment (idempotent)."""
     result = await db.execute(
         select(TaskAssignment).where(
             TaskAssignment.user_id == current_user.id,
@@ -338,7 +315,6 @@ async def award_points(
             detail="Points can only be awarded for completed assignments",
         )
 
-    # Idempotency check — don't award twice
     existing_log = await db.execute(
         select(PointsLog).where(
             PointsLog.user_id == current_user.id,
@@ -348,13 +324,11 @@ async def award_points(
     if existing_log.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Points already awarded for this task")
 
-    # Fetch task to get point_value
     task_result = await db.execute(select(Task).where(Task.id == task_id))
     task = task_result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
-    # Credit points and create audit log entry
     current_user.points += task.point_value
     log_entry = PointsLog(
         user_id=current_user.id,

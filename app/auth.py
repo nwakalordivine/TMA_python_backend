@@ -17,18 +17,12 @@ from app.database import get_db
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
 # Configuration
-# ---------------------------------------------------------------------------
-
 SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
-# ---------------------------------------------------------------------------
 # Password hashing
-# ---------------------------------------------------------------------------
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
@@ -40,10 +34,7 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
-# ---------------------------------------------------------------------------
 # JWT helpers
-# ---------------------------------------------------------------------------
-
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
@@ -56,10 +47,7 @@ def decode_access_token(token: str) -> dict:
     return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
 
-# ---------------------------------------------------------------------------
 # FastAPI dependency — get current authenticated user
-# ---------------------------------------------------------------------------
-
 bearer_scheme = HTTPBearer()
 
 
